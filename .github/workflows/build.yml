@@ -10,22 +10,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 解包源码
+      - name: unzip source
         run: |
-          echo "=== 仓库内容 ==="
           ls -la
-          if [ -f AUGLike_src.zip ]; then
-            echo "发现 zip，解包中"
-            unzip -o -q AUGLike_src.zip
-          fi
+          for f in *.zip; do
+            [ -f "$f" ] && echo "unzip $f" && unzip -o -q "$f"
+          done
           if [ ! -f Makefile ] && [ -f aug_like/Makefile ]; then
             cp -r aug_like/* .
           fi
-          echo "=== 解包后 ==="
           ls -la
-          test -f Makefile || (echo "没找到 Makefile" && exit 1)
+          test -f Makefile || (echo "Makefile missing" && exit 1)
 
-      - name: 安装 Theos
+      - name: install theos
         run: |
           export THEOS=$HOME/theos
           git clone --recursive --depth 1 https://github.com/theos/theos.git $THEOS
@@ -37,13 +34,13 @@ jobs:
           tar -xJf /tmp/sdk.tar.xz -C $THEOS/sdks
           echo "THEOS=$THEOS" >> $GITHUB_ENV
 
-      - name: 拉 ImGui
+      - name: imgui
         run: git clone --depth 1 --branch v1.90.9 https://github.com/ocornut/imgui.git imgui
 
-      - name: 编译
+      - name: make
         run: make -j4
 
-      - name: 收集产物
+      - name: collect
         run: |
           mkdir -p dist
           find .theos -name "*.dylib" -exec cp {} dist/ \;
