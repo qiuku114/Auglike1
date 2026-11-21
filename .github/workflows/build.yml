@@ -2,6 +2,6 @@ name: b
 on: [push,workflow_dispatch]
 jobs:
   b:
-    runs-on: macos-14
+    runs-on: macos-13
     steps:
       - run: echo hi
