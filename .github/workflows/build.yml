@@ -1,7 +1,57 @@
-name: b
-on: [push,workflow_dispatch]
+name: build
+
+on:
+  push:
+  workflow_dispatch:
+
 jobs:
-  b:
+  build:
     runs-on: macos-13
     steps:
-      - run: echo hi
+      - uses: actions/checkout@v4
+
+      - name: env
+        run: |
+          sw_vers
+          xcodebuild -version || true
+          which clang python3 unzip git curl || true
+
+      - name: unzip source
+        run: |
+          ls -la
+          for f in *.zip; do
+            if [ -f "$f" ]; then echo "== $f"; unzip -o -q "$f"; fi
+          done
+          ls -la
+          test -f Makefile || { echo "Makefile missing"; exit 1; }
+
+      - name: install theos
+        run: |
+          export THEOS=$HOME/theos
+          git clone --recursive --depth 1 https://github.com/theos/theos.git $THEOS
+          mkdir -p $THEOS/sdks
+          curl -L --retry 3 -o /tmp/sdk.tar.xz https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz
+          ls -lh /tmp/sdk.tar.xz
+          tar -xJf /tmp/sdk.tar.xz -C $THEOS/sdks
+          ls $THEOS/sdks
+          echo "THEOS=$THEOS" >> $GITHUB_ENV
+
+      - name: imgui
+        run: git clone --depth 1 --branch v1.90.9 https://github.com/ocornut/imgui.git imgui
+
+      - name: build
+        run: |
+          set -o pipefail
+          make -j4 2>&1 | tail -80
+
+      - name: collect
+        run: |
+          mkdir -p dist
+          find .theos -name "*.dylib" -exec cp {} dist/ \;
+          ls -lh dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AUGLike-dylib
+          path: dist/*.dylib
+          if-no-files-found: error
