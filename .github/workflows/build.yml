@@ -6,15 +6,16 @@ on:
 
 jobs:
   build:
-    runs-on: macos-13
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: env
+      - name: deps
         run: |
-          sw_vers
-          xcodebuild -version || true
-          which clang python3 unzip git curl || true
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang lld make unzip zip curl xz-utils
+          clang --version
+          ld64.lld --version || true
 
       - name: unzip source
         run: |
@@ -23,35 +24,52 @@ jobs:
             if [ -f "$f" ]; then echo "== $f"; unzip -o -q "$f"; fi
           done
           ls -la
-          test -f Makefile || { echo "Makefile missing"; exit 1; }
+          test -f Makefile
 
-      - name: install theos
+      - name: ios sdk
         run: |
-          export THEOS=$HOME/theos
-          git clone --recursive --depth 1 https://github.com/theos/theos.git $THEOS
-          mkdir -p $THEOS/sdks
-          curl -L --retry 3 -o /tmp/sdk.tar.xz https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz
+          curl -L --retry 3 -o /tmp/sdk.tar.xz \
+            https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz
           ls -lh /tmp/sdk.tar.xz
-          tar -xJf /tmp/sdk.tar.xz -C $THEOS/sdks
-          ls $THEOS/sdks
-          echo "THEOS=$THEOS" >> $GITHUB_ENV
+          mkdir -p "$HOME/sdk"
+          tar -xJf /tmp/sdk.tar.xz -C "$HOME/sdk"
+          ls "$HOME/sdk"
 
       - name: imgui
         run: git clone --depth 1 --branch v1.90.9 https://github.com/ocornut/imgui.git imgui
 
-      - name: build
+      - name: compile
         run: |
-          set -o pipefail
-          make -j4 2>&1 | tail -80
+          SDK="$HOME/sdk/iPhoneOS16.5.sdk"
+          FLAGS="-target arm64-apple-ios15.0 -isysroot $SDK -fobjc-arc -std=c++17 -O2 -Iimgui -Iimgui/backends -Isrc"
+          mkdir -p obj
+          for f in src/*.mm; do
+            echo "== $f"
+            clang++ $FLAGS -c "$f" -o "obj/$(basename "$f").o" || exit 1
+          done
+          for f in imgui/imgui.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp; do
+            echo "== $f"
+            clang++ $FLAGS -c "$f" -o "obj/$(basename "$f").o" || exit 1
+          done
+          echo "== imgui_impl_metal.mm"
+          clang++ $FLAGS -c imgui/backends/imgui_impl_metal.mm -o obj/imgui_impl_metal.o || exit 1
+          ls -la obj
 
-      - name: collect
+      - name: link
         run: |
-          mkdir -p dist
-          find .theos -name "*.dylib" -exec cp {} dist/ \;
-          ls -lh dist
+          SDK="$HOME/sdk/iPhoneOS16.5.sdk"
+          clang++ -target arm64-apple-ios15.0 -isysroot "$SDK" \
+            -fuse-ld=lld -dynamiclib \
+            -arch arm64 -platform_version ios 15.0 16.5 \
+            -install_name @executable_path/AUGLike.dylib \
+            -framework UIKit -framework Foundation -framework Metal -framework MetalKit -framework QuartzCore \
+            -undefined dynamic_lookup \
+            -o AUGLike.dylib obj/*.o
+          ls -lh AUGLike.dylib
+          file AUGLike.dylib
 
       - uses: actions/upload-artifact@v4
         with:
           name: AUGLike-dylib
-          path: dist/*.dylib
+          path: AUGLike.dylib
           if-no-files-found: error
